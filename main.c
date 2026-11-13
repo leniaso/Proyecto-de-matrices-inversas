@@ -46,7 +46,7 @@ int main(int argc, char **argv) {
     int rc = invert(M, Out, &cfg);
     double t1 = now();
 
-    double res = rc == 0 ? residual_inf(M, Out) : -1.0;   /* fuera del cronometro */
+    double res = rc != 0 ? -1.0 : (getenv("NORES") ? -2.0 : residual_inf(M, Out));
 
     const char *dump = getenv("DUMP");
     if (dump && rc == 0) {

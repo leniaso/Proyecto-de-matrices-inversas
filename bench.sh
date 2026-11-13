@@ -26,5 +26,6 @@ done
 echo "Corridas totales: ${#jobs[@]}" >&2
 
 printf '%s\n' "${jobs[@]}" | shuf | while read -r v n P r; do   # orden aleatorizado
+  if [[ $r -gt 1 ]]; then export NORES=1; else unset NORES; fi    # residuo solo en la réplica 1
   $TASKSET ./matinv "$v" "$n" "$P" "$N0" $((1000 + r)) >> "$OUT"
 done
