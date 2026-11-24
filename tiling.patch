@@ -1,0 +1,59 @@
+diff --git a/matrix.c b/matrix.c
+index 021708b..a1176d8 100644
+--- a/matrix.c
++++ b/matrix.c
+@@ -111,22 +111,45 @@ int gauss_jordan(Mat M, Mat Out) {
+ }
+ 
+ /* ================= Producto de matrices ================= */
+-#define BK 64
++/* Producto por filas con bloqueo de registros: se procesan MR filas de A a la vez,
++ * de modo que cada fila de B leida de memoria se reutiliza MR veces (menos trafico
++ * de memoria), y las columnas se recorren en bloques de JB para que las MR filas de C
++ * y el trozo de B quepan en la cache L1. El orden de las sumas por elemento no cambia. */
++#define MR 4
++#define JB 512
+ void gemm_rows(const Gemm *g, int r0, int r1) {
+     int K = g->A.c, N = g->C.c;
++    const double alpha = g->alpha, beta = g->beta;
+     for (int i = r0; i < r1; i++) {
+         double *c = at(g->C, i, 0);
+-        if (g->beta == 0.0)      memset(c, 0, (size_t)N * sizeof(double));
+-        else if (g->beta != 1.0) for (int j = 0; j < N; j++) c[j] *= g->beta;
+-        for (int k0 = 0; k0 < K; k0 += BK) {
+-            int k1 = k0 + BK < K ? k0 + BK : K;
+-            for (int k = k0; k < k1; k++) {
+-                double a = g->alpha * *at(g->A, i, k);
+-                const double *b = at(g->B, k, 0);
+-                for (int j = 0; j < N; j++) c[j] += a * b[j];
++        if (beta == 0.0)      memset(c, 0, (size_t)N * sizeof(double));
++        else if (beta != 1.0) for (int j = 0; j < N; j++) c[j] *= beta;
++    }
++    int i = r0;
++    for (; i + MR <= r1; i += MR) {
++        double *restrict c0 = at(g->C, i, 0), *restrict c1 = at(g->C, i + 1, 0);
++        double *restrict c2 = at(g->C, i + 2, 0), *restrict c3 = at(g->C, i + 3, 0);
++        for (int j0 = 0; j0 < N; j0 += JB) {
++            int j1 = j0 + JB < N ? j0 + JB : N;
++            for (int k = 0; k < K; k++) {
++                double a0 = alpha * *at(g->A, i, k),     a1 = alpha * *at(g->A, i + 1, k);
++                double a2 = alpha * *at(g->A, i + 2, k), a3 = alpha * *at(g->A, i + 3, k);
++                const double *restrict b = at(g->B, k, 0);
++                for (int j = j0; j < j1; j++) {
++                    double bj = b[j];
++                    c0[j] += a0 * bj; c1[j] += a1 * bj; c2[j] += a2 * bj; c3[j] += a3 * bj;
++                }
+             }
+         }
+     }
++    for (; i < r1; i++) {                       /* filas sobrantes */
++        double *restrict c = at(g->C, i, 0);
++        for (int k = 0; k < K; k++) {
++            double a = alpha * *at(g->A, i, k);
++            const double *restrict b = at(g->B, k, 0);
++            for (int j = 0; j < N; j++) c[j] += a * b[j];
++        }
++    }
+ }
+ 
+ typedef struct { const Gemm *g; int r0, r1; } Slice;

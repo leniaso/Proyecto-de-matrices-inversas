@@ -17,7 +17,7 @@ int main(int argc, char **argv) {
         return 0;
     }
     if (argc < 6) {
-        fprintf(stderr, "uso: %s <seq|threads|procs|hier> <n> <P> <n0> <seed> [singular]\n"
+        fprintf(stderr, "uso: %s <seq|threads|procs|hier|pairt> <n> <P> <n0> <seed> [singular]\n"
                         "     %s --header\n"
                         "     DUMP=prefijo guarda matriz e inversa (binario) para validar con numpy\n",
                 argv[0], argv[0]);
@@ -28,6 +28,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(vn, "threads")) cfg.v = V_THREADS;
     else if (!strcmp(vn, "procs"))   cfg.v = V_PROCS;
     else if (!strcmp(vn, "hier"))    cfg.v = V_HIER;
+    else if (!strcmp(vn, "pairt"))   cfg.v = V_PAIRT;
     else { fprintf(stderr, "version desconocida\n"); return 1; }
     int n = atoi(argv[2]); cfg.P = atoi(argv[3]); cfg.n0 = atoi(argv[4]);
     unsigned seed = (unsigned)atoi(argv[5]);

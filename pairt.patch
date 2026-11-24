@@ -1,0 +1,72 @@
+diff --git a/invert.c b/invert.c
+index 1daa1f8..3747fe1 100644
+--- a/invert.c
++++ b/invert.c
+@@ -3,6 +3,7 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <unistd.h>
++#include <pthread.h>
+ #include <sys/wait.h>
+ 
+ /* Un producto independiente, segun la version. */
+@@ -12,12 +13,25 @@ static void do_gemm(const Gemm *g, const Cfg *c) {
+     case V_THREADS: gemm_threads(g, c->P); break;
+     case V_PROCS:   gemm_procs(g, c->P, 1); break;
+     case V_HIER:    gemm_threads(g, c->P); break;   /* productos dependientes: todos los hilos */
++    case V_PAIRT:   gemm_threads(g, c->P); break;
+     }
+ }
+ 
++/* Variante de diagnostico PAIRT: igual que HIER pero el par corre en hilos (sin fork). */
++typedef struct { const Gemm *g; int t; } PairArg;
++static void *pair_worker(void *p) { PairArg *a = p; gemm_threads(a->g, a->t); return NULL; }
++
+ /* Dos productos independientes (nodos verdes de la Figura 1).
+  * HIER: cada uno en un proceso distinto y, dentro, hilos por filas. */
+ static void do_pair(const Gemm *a, const Gemm *b, const Cfg *c) {
++    if (c->v == V_PAIRT) {
++        int t = c->P / 2; if (t < 1) t = 1;
++        PairArg arg = { b, t }; pthread_t th;
++        if (pthread_create(&th, NULL, pair_worker, &arg)) { perror("pthread_create"); exit(1); }
++        gemm_threads(a, t);
++        pthread_join(th, NULL);
++        return;
++    }
+     if (c->v != V_HIER) { do_gemm(a, c); do_gemm(b, c); return; }
+     int t = c->P / 2; if (t < 1) t = 1;
+     pid_t pid = fork();
+diff --git a/main.c b/main.c
+index 6f509ae..7eefe01 100644
+--- a/main.c
++++ b/main.c
+@@ -17,7 +17,7 @@ int main(int argc, char **argv) {
+         return 0;
+     }
+     if (argc < 6) {
+-        fprintf(stderr, "uso: %s <seq|threads|procs|hier> <n> <P> <n0> <seed> [singular]\n"
++        fprintf(stderr, "uso: %s <seq|threads|procs|hier|pairt> <n> <P> <n0> <seed> [singular]\n"
+                         "     %s --header\n"
+                         "     DUMP=prefijo guarda matriz e inversa (binario) para validar con numpy\n",
+                 argv[0], argv[0]);
+@@ -28,6 +28,7 @@ int main(int argc, char **argv) {
+     else if (!strcmp(vn, "threads")) cfg.v = V_THREADS;
+     else if (!strcmp(vn, "procs"))   cfg.v = V_PROCS;
+     else if (!strcmp(vn, "hier"))    cfg.v = V_HIER;
++    else if (!strcmp(vn, "pairt"))   cfg.v = V_PAIRT;
+     else { fprintf(stderr, "version desconocida\n"); return 1; }
+     int n = atoi(argv[2]); cfg.P = atoi(argv[3]); cfg.n0 = atoi(argv[4]);
+     unsigned seed = (unsigned)atoi(argv[5]);
+diff --git a/matrix.h b/matrix.h
+index 7fbb260..79ba425 100644
+--- a/matrix.h
++++ b/matrix.h
+@@ -32,7 +32,7 @@ void gemm_threads(const Gemm *g, int nthreads);         /* filas entre hilos */
+ void gemm_procs(const Gemm *g, int nprocs, int nthreads); /* filas entre procesos (y hilos) */
+ 
+ /* ---- Inversión por bloques (complemento de Schur) ---- */
+-typedef enum { V_SEQ, V_THREADS, V_PROCS, V_HIER } Version;
++typedef enum { V_SEQ, V_THREADS, V_PROCS, V_HIER, V_PAIRT } Version;
+ typedef struct { Version v; int P; int n0; } Cfg;
+ int invert(Mat M, Mat Out, const Cfg *cfg);             /* 0 ok, -1 singular */
+ 

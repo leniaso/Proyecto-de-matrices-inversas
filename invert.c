@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <pthread.h>
 #include <sys/wait.h>
 
 /* Un producto independiente, segun la version. */
@@ -12,12 +13,25 @@ static void do_gemm(const Gemm *g, const Cfg *c) {
     case V_THREADS: gemm_threads(g, c->P); break;
     case V_PROCS:   gemm_procs(g, c->P, 1); break;
     case V_HIER:    gemm_threads(g, c->P); break;   /* productos dependientes: todos los hilos */
+    case V_PAIRT:   gemm_threads(g, c->P); break;
     }
 }
+
+/* Variante de diagnostico PAIRT: igual que HIER pero el par corre en hilos (sin fork). */
+typedef struct { const Gemm *g; int t; } PairArg;
+static void *pair_worker(void *p) { PairArg *a = p; gemm_threads(a->g, a->t); return NULL; }
 
 /* Dos productos independientes (nodos verdes de la Figura 1).
  * HIER: cada uno en un proceso distinto y, dentro, hilos por filas. */
 static void do_pair(const Gemm *a, const Gemm *b, const Cfg *c) {
+    if (c->v == V_PAIRT) {
+        int t = c->P / 2; if (t < 1) t = 1;
+        PairArg arg = { b, t }; pthread_t th;
+        if (pthread_create(&th, NULL, pair_worker, &arg)) { perror("pthread_create"); exit(1); }
+        gemm_threads(a, t);
+        pthread_join(th, NULL);
+        return;
+    }
     if (c->v != V_HIER) { do_gemm(a, c); do_gemm(b, c); return; }
     int t = c->P / 2; if (t < 1) t = 1;
     pid_t pid = fork();
