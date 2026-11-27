@@ -2,6 +2,7 @@
 #include "matrix.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <semaphore.h>
@@ -164,6 +165,95 @@ void procs_pool_destroy(void) {
     g_np = 0;
 }
 
+/* ================= Procesos con pipes (búfer local) ================= */
+static void write_all(int fd, const void *buf, size_t n) {
+    const char *p = buf;
+    size_t off = 0;
+    while (off < n) {
+        ssize_t w = write(fd, p + off, n - off);
+        if (w < 0) {
+            if (errno == EINTR) continue;
+            perror("write"); _exit(1);
+        }
+        off += (size_t)w;
+    }
+}
+
+static void read_all(int fd, void *buf, size_t n) {
+    char *p = buf;
+    size_t off = 0;
+    while (off < n) {
+        ssize_t r = read(fd, p + off, n - off);
+        if (r < 0) {
+            if (errno == EINTR) continue;
+            perror("read"); exit(1);
+        }
+        if (r == 0) { fprintf(stderr, "pipe EOF prematuro\n"); exit(1); }
+        off += (size_t)r;
+    }
+}
+
+static void procs_pipe_gemm(const Gemm *g, int np) {
+    int rows = g->C.r, cols = g->C.c;
+    if (np > rows) np = rows;
+    if (np > 64) np = 64;
+    if (np <= 1) { gemm_rows(g, 0, rows); return; }
+
+    pid_t pids[64];
+    int rfds[64], r0s[64], r1s[64];
+
+    for (int p = 0; p < np; p++) {
+        int pfd[2];
+        if (pipe(pfd) < 0) { perror("pipe"); exit(1); }
+        int r0 = (int)((long)rows * p / np);
+        int r1 = (int)((long)rows * (p + 1) / np);
+        r0s[p] = r0;
+        r1s[p] = r1;
+
+        pid_t pid = fork();
+        if (pid < 0) { perror("fork"); exit(1); }
+        if (pid == 0) {
+            for (int k = 0; k < p; k++) close(rfds[k]);
+            close(pfd[0]);
+            int nr = r1 - r0;
+            size_t bytes = (size_t)nr * cols * sizeof(double);
+            double *buf = malloc(bytes ? bytes : 1);
+            if (!buf) { perror("malloc"); _exit(1); }
+            if (g->beta != 0.0) {
+                for (int i = 0; i < nr; i++)
+                    memcpy(buf + (size_t)i * cols, at(g->C, r0 + i, 0), (size_t)cols * sizeof(double));
+            }
+            Gemm lg = { sub(g->A, r0, 0, nr, g->A.c), g->B, { buf, nr, cols, cols }, g->alpha, g->beta };
+            gemm_rows(&lg, 0, nr);
+            write_all(pfd[1], buf, bytes);
+            free(buf);
+            close(pfd[1]);
+            _exit(0);
+        }
+        close(pfd[1]);
+        rfds[p] = pfd[0];
+        pids[p] = pid;
+    }
+
+    for (int p = 0; p < np; p++) {
+        int nr = r1s[p] - r0s[p];
+        size_t bytes = (size_t)nr * cols * sizeof(double);
+        double *buf = malloc(bytes ? bytes : 1);
+        if (!buf) { perror("malloc"); exit(1); }
+        read_all(rfds[p], buf, bytes);
+        close(rfds[p]);
+        for (int i = 0; i < nr; i++)
+            memcpy(at(g->C, r0s[p] + i, 0), buf + (size_t)i * cols, (size_t)cols * sizeof(double));
+        free(buf);
+    }
+
+    for (int p = 0; p < np; p++) {
+        int st;
+        while (waitpid(pids[p], &st, 0) == -1 && errno == EINTR) {}
+        if (!WIFEXITED(st) || WEXITSTATUS(st)) { fprintf(stderr, "hijo fallo\n"); exit(1); }
+    }
+}
+
 /* Un producto independiente, segun la version. */
 static void do_gemm(const Gemm *g, const Cfg *c, ThreadPool *pool) {
     switch (c->v) {
@@ -174,6 +264,7 @@ static void do_gemm(const Gemm *g, const Cfg *c, ThreadPool *pool) {
     case V_PAIRT:           gemm_threads(g, c->P); break;
     case V_THREADS_BARRIER: pool_gemm(pool, g); break;
     case V_PROCS_POOL:      procs_pool_gemm(g); break;
+    case V_PROCS_PIPE:      procs_pipe_gemm(g, c->P); break;
     }
 }
 
