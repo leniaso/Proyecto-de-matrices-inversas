@@ -41,7 +41,6 @@ int main(int argc, char **argv) {
 
     size_t bytes = (size_t)6 * n * n * sizeof(double) + (1 << 20);
     if (arena_init(bytes)) return 1;
-    if (cfg.v == V_PROCS_POOL) procs_pool_init(cfg.P);
 
     Mat M = arena_mat(n, n), Out = arena_mat(n, n);
     mat_diagdom(M, seed);
@@ -49,9 +48,10 @@ int main(int argc, char **argv) {
         memcpy(at(M, 1, 0), at(M, 0, 0), (size_t)n * sizeof(double));   /* fila repetida */
 
     double t0 = now();
+    if (cfg.v == V_PROCS_POOL) procs_pool_init(cfg.P);
     int rc = invert(M, Out, &cfg);
-    double t1 = now();
     if (cfg.v == V_PROCS_POOL) procs_pool_destroy();
+    double t1 = now();
 
     double res = rc != 0 ? -1.0 : (getenv("NORES") ? -2.0 : residual_inf(M, Out));
 
