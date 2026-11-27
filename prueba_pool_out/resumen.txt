@@ -1,0 +1,132 @@
+======================================================================
+1. VALIDACION DE CORRECCION
+======================================================================
+Corridas totales: 66; con residuo calculado: 22
+Residuo maximo: 8.250e-15  (umbral 1e-8) -> CUMPLE
+Configuraciones con residuo verificado: 22 de 22
+
+======================================================================
+2. RESUMEN (media, IC95%, aceleracion S=T1/TP, eficiencia E=S/P)
+======================================================================
+
+--- n = 512 ---
+               cfg  reps   media  ic95_lo  ic95_hi  cv_pct  speedup  eficiencia
+               seq     3 0.04563  0.04449  0.04678    1.01        1           1
+        threads-P2     3 0.03395  0.03277  0.03513     1.4    1.344      0.6721
+        threads-P4     3 0.02628  0.02262  0.02993   5.599    1.736      0.4341
+        threads-P8     3 0.02715  0.02334  0.03097   5.658    1.681      0.2101
+          procs-P2     3 0.04005  0.03389  0.04622   6.198    1.139      0.5696
+          procs-P4     3  0.0339  0.03059  0.03722   3.931    1.346      0.3365
+          procs-P8     3 0.03762  0.03625  0.03899   1.466    1.213      0.1516
+           hier-P2     3 0.03567  0.03547  0.03586  0.2189    1.279      0.6397
+           hier-P4     3 0.02745  0.02636  0.02855   1.604    1.662      0.4156
+           hier-P8     3  0.0276  0.02307  0.03213   6.609    1.653      0.2067
+threads_barrier-P2     3 0.03246  0.02834  0.03658   5.111    1.406      0.7029
+threads_barrier-P4     3 0.02467  0.01976  0.02958   8.007     1.85      0.4624
+threads_barrier-P8     3 0.02334  0.02162  0.02507   2.974    1.955      0.2444
+     procs_pool-P2     3 0.03546  0.03031  0.04061   5.846    1.287      0.6434
+     procs_pool-P4     3  0.0263  0.02302  0.02959   5.023    1.735      0.4337
+     procs_pool-P8     3 0.02509  0.02428  0.02591   1.309    1.819      0.2273
+     procs_pipe-P2     3 0.04885  0.04681  0.05088   1.677   0.9341      0.4671
+     procs_pipe-P4     3 0.04191  0.03672   0.0471   4.986    1.089      0.2722
+     procs_pipe-P8     3 0.04206  0.04139  0.04272  0.6386    1.085      0.1356
+  threads_queue-P2     3 0.03333  0.03154  0.03512   2.159    1.369      0.6845
+  threads_queue-P4     3 0.02552  0.01719  0.03385   13.14    1.788       0.447
+  threads_queue-P8     3 0.02393  0.02016  0.02769   6.339    1.907      0.2384
+
+======================================================================
+3. SUPUESTOS (sobre log(tiempo))
+======================================================================
+Shapiro-Wilk: 21 de 22 configuraciones son compatibles con normalidad (p>0.05) -> 95%
+Levene (homogeneidad de varianzas) n=512: p = 0.404 -> se cumple
+
+Decision: se cumplen los supuestos -> ANOVA + Tukey
+
+======================================================================
+4. PRUEBAS OMNIBUS
+======================================================================
+n=512: Kruskal-Wallis H=61.4 p=7.88e-06 | ANOVA 1 via F=59.4 p=1.39e-25
+
+ANOVA factorial sobre log(tiempo), solo versiones paralelas:
+                  sum_sq  df     F    PR(>F)  eta2_parcial
+C(version)         1.892   6 116.5 1.504e-24        0.9433
+C(P_)             0.8186   2 151.2 6.472e-20         0.878
+C(version):C(P_)  0.1081  12 3.328  0.001875        0.4874
+Residual          0.1137  42   NaN       NaN           0.5
+
+======================================================================
+5. HIPOTESIS PRINCIPAL  H0: T(hier) = T(otra)   H1: T(hier) < T(otra)   (alfa=0.05, Holm)
+======================================================================
+
+--- hier vs seq ---
+  n  P  mediana_hier  mediana_otra  cambio_pct  p_holm  cliff_delta signif
+512  2       0.03569       0.04577      -22.03       1            1     no
+512  4        0.0277       0.04577      -39.48       1            1     no
+512  8       0.02722       0.04577      -40.52       1            1     no
+
+--- hier vs threads ---
+  n  P  mediana_hier  mediana_otra  cambio_pct  p_holm  cliff_delta signif
+512  2       0.03569       0.03371       5.877       1           -1     no
+512  2       0.03569       0.03266       9.281       1           -1     no
+512  2       0.03569       0.03315       7.649       1           -1     no
+512  4        0.0277       0.02607       6.265       1      -0.3333     no
+512  4        0.0277       0.02391       15.83       1           -1     no
+512  4        0.0277       0.02533       9.352       1      -0.3333     no
+512  8       0.02722       0.02712      0.3761       1      -0.3333     no
+512  8       0.02722       0.02352       15.76       1           -1     no
+512  8       0.02722       0.02352       15.74       1           -1     no
+
+--- hier vs procs ---
+  n  P  mediana_hier  mediana_otra  cambio_pct  p_holm  cliff_delta signif
+512  2       0.03569       0.03973      -10.18       1            1     no
+512  2       0.03569       0.03451       3.401       1      -0.3333     no
+512  2       0.03569       0.04893      -27.06       1            1     no
+512  4        0.0277       0.03331      -16.83       1            1     no
+512  4        0.0277       0.02673       3.644       1      -0.7778     no
+512  4        0.0277       0.04134         -33       1            1     no
+512  8       0.02722       0.03746      -27.33       1            1     no
+512  8       0.02722       0.02521       7.972       1           -1     no
+512  8       0.02722       0.04201       -35.2       1            1     no
+
+--- hier vs threads_barrier ---
+  n  P  mediana_hier  mediana_otra  cambio_pct  p_holm  cliff_delta signif
+512  2       0.03569       0.03266       9.281       1           -1     no
+512  4        0.0277       0.02391       15.83       1           -1     no
+512  8       0.02722       0.02352       15.76       1           -1     no
+
+--- hier vs procs_pool ---
+  n  P  mediana_hier  mediana_otra  cambio_pct  p_holm  cliff_delta signif
+512  2       0.03569       0.03451       3.401       1      -0.3333     no
+512  4        0.0277       0.02673       3.644       1      -0.7778     no
+512  8       0.02722       0.02521       7.972       1           -1     no
+
+--- hier vs procs_pipe ---
+  n  P  mediana_hier  mediana_otra  cambio_pct  p_holm  cliff_delta signif
+512  2       0.03569       0.04893      -27.06       1            1     no
+512  4        0.0277       0.04134         -33       1            1     no
+512  8       0.02722       0.04201       -35.2       1            1     no
+
+--- hier vs threads_queue ---
+  n  P  mediana_hier  mediana_otra  cambio_pct  p_holm  cliff_delta signif
+512  2       0.03569       0.03315       7.649       1           -1     no
+512  4        0.0277       0.02533       9.352       1      -0.3333     no
+512  8       0.02722       0.02352       15.74       1           -1     no
+
+======================================================================
+6. AMDAHL: f estimada con P=2 -> aceleracion predicha para P=4 y 8 vs observada
+======================================================================
+  n         version  f_est_P2  P  S_pred  S_obs  obs_sobre_pred
+512         threads     0.512  4    1.62   1.74            1.07
+512         threads     0.512  8    1.81   1.68           0.928
+512           procs     0.244  4    1.22   1.35             1.1
+512           procs     0.244  8    1.27   1.21           0.953
+512            hier     0.437  4    1.49   1.66            1.12
+512            hier     0.437  8    1.62   1.65            1.02
+512 threads_barrier     0.577  4    1.76   1.85            1.05
+512 threads_barrier     0.577  8    2.02   1.95           0.967
+512      procs_pool     0.446  4     1.5   1.73            1.15
+512      procs_pool     0.446  8    1.64   1.82            1.11
+512      procs_pipe         0  4       1   1.09            1.09
+512      procs_pipe         0  8       1   1.08            1.08
+512   threads_queue     0.539  4    1.68   1.79            1.06
+512   threads_queue     0.539  8    1.89   1.91            1.01
