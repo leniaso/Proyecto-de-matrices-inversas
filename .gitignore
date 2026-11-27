@@ -1,4 +1,5 @@
 matinv
 venv/
 *.bin
-__pycache__/*:Zone.Identifier
+__pycache__/
+*:Zone.Identifier
