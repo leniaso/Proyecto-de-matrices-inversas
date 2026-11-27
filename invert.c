@@ -254,6 +254,112 @@ static void procs_pipe_gemm(const Gemm *g, int np) {
     }
 }
 
+/* ================= Pool de hilos con cola dinámica (mutex + cond) ================= */
+#define QUEUE_BLK 32
+
+typedef struct {
+    int P;
+    int stop;
+    const Gemm *cur_g;
+    int next_row;
+    int total_rows;
+    int pending;
+    int blocks_done;
+    int total_blocks;
+    pthread_mutex_t mtx;
+    pthread_cond_t cond_work;
+    pthread_cond_t cond_done;
+    pthread_t *th;
+} QueuePool;
+
+static QueuePool *g_qpool = NULL;
+
+static void *qpool_worker(void *arg) {
+    QueuePool *q = arg;
+    pthread_mutex_lock(&q->mtx);
+    for (;;) {
+        while (!q->stop && q->next_row >= q->total_rows)
+            pthread_cond_wait(&q->cond_work, &q->mtx);
+        if (q->stop) break;
+
+        int r0 = q->next_row;
+        int r1 = r0 + QUEUE_BLK;
+        if (r1 > q->total_rows) r1 = q->total_rows;
+        q->next_row = r1;
+        const Gemm *g = q->cur_g;
+        pthread_mutex_unlock(&q->mtx);
+
+        gemm_rows(g, r0, r1);
+
+        pthread_mutex_lock(&q->mtx);
+        q->blocks_done++;
+        if (--q->pending == 0)
+            pthread_cond_signal(&q->cond_done);
+    }
+    pthread_mutex_unlock(&q->mtx);
+    return NULL;
+}
+
+static void qpool_init(QueuePool *q, int P) {
+    q->P = P < 1 ? 1 : P;
+    q->stop = 0;
+    q->cur_g = NULL;
+    q->next_row = 0;
+    q->total_rows = 0;
+    q->pending = 0;
+    q->blocks_done = 0;
+    q->total_blocks = 0;
+    q->th = NULL;
+    if (q->P <= 1) return;
+    q->th = malloc((size_t)q->P * sizeof(pthread_t));
+    if (!q->th) { perror("malloc"); exit(1); }
+    if (pthread_mutex_init(&q->mtx, NULL) ||
+        pthread_cond_init(&q->cond_work, NULL) ||
+        pthread_cond_init(&q->cond_done, NULL)) {
+        perror("pthread_mutex/cond_init"); exit(1);
+    }
+    for (int t = 0; t < q->P; t++) {
+        if (pthread_create(&q->th[t], NULL, qpool_worker, q)) {
+            perror("pthread_create"); exit(1);
+        }
+    }
+}
+
+static void qpool_gemm(QueuePool *q, const Gemm *g) {
+    int rows = g->C.r;
+    if (rows <= 0) return;
+    if (q->P <= 1) { gemm_rows(g, 0, rows); return; }
+    int nblk = (rows + QUEUE_BLK - 1) / QUEUE_BLK;
+    pthread_mutex_lock(&q->mtx);
+    q->cur_g = g;
+    q->next_row = 0;
+    q->total_rows = rows;
+    q->pending = nblk;
+    q->blocks_done = 0;
+    q->total_blocks = nblk;
+    pthread_cond_broadcast(&q->cond_work);
+    while (q->pending > 0)
+        pthread_cond_wait(&q->cond_done, &q->mtx);
+    if (q->blocks_done != q->total_blocks) {
+        fprintf(stderr, "threads_queue: bloques %d != %d\n", q->blocks_done, q->total_blocks);
+        exit(1);
+    }
+    pthread_mutex_unlock(&q->mtx);
+}
+
+static void qpool_destroy(QueuePool *q) {
+    if (q->P <= 1) return;
+    pthread_mutex_lock(&q->mtx);
+    q->stop = 1;
+    pthread_cond_broadcast(&q->cond_work);
+    pthread_mutex_unlock(&q->mtx);
+    for (int t = 0; t < q->P; t++) pthread_join(q->th[t], NULL);
+    pthread_mutex_destroy(&q->mtx);
+    pthread_cond_destroy(&q->cond_work);
+    pthread_cond_destroy(&q->cond_done);
+    free(q->th);
+}
+
 /* Un producto independiente, segun la version. */
 static void do_gemm(const Gemm *g, const Cfg *c, ThreadPool *pool) {
     switch (c->v) {
@@ -265,6 +371,7 @@ static void do_gemm(const Gemm *g, const Cfg *c, ThreadPool *pool) {
     case V_THREADS_BARRIER: pool_gemm(pool, g); break;
     case V_PROCS_POOL:      procs_pool_gemm(g); break;
     case V_PROCS_PIPE:      procs_pipe_gemm(g, c->P); break;
+    case V_THREADS_QUEUE:   qpool_gemm(g_qpool, g); break;
     }
 }
 
@@ -339,6 +446,15 @@ int invert(Mat M, Mat Out, const Cfg *cfg) {
         pool_init(&pool, cfg->P);
         int rc = inv_rec(M, Out, cfg, &pool);
         pool_destroy(&pool);
+        return rc;
+    }
+    if (cfg->v == V_THREADS_QUEUE) {
+        QueuePool qp;
+        qpool_init(&qp, cfg->P);
+        g_qpool = &qp;
+        int rc = inv_rec(M, Out, cfg, NULL);
+        qpool_destroy(&qp);
+        g_qpool = NULL;
         return rc;
     }
     return inv_rec(M, Out, cfg, NULL);
