@@ -17,7 +17,7 @@ int main(int argc, char **argv) {
         return 0;
     }
     if (argc < 6) {
-        fprintf(stderr, "uso: %s <seq|threads|procs|hier|pairt|threads_barrier> <n> <P> <n0> <seed> [singular]\n"
+        fprintf(stderr, "uso: %s <seq|threads|procs|hier|pairt|threads_barrier|procs_pool> <n> <P> <n0> <seed> [singular]\n"
                         "     %s --header\n"
                         "     DUMP=prefijo guarda matriz e inversa (binario) para validar con numpy\n",
                 argv[0], argv[0]);
@@ -30,6 +30,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(vn, "hier"))            cfg.v = V_HIER;
     else if (!strcmp(vn, "pairt"))           cfg.v = V_PAIRT;
     else if (!strcmp(vn, "threads_barrier")) cfg.v = V_THREADS_BARRIER;
+    else if (!strcmp(vn, "procs_pool"))      cfg.v = V_PROCS_POOL;
     else { fprintf(stderr, "version desconocida\n"); return 1; }
     int n = atoi(argv[2]); cfg.P = atoi(argv[3]); cfg.n0 = atoi(argv[4]);
     unsigned seed = (unsigned)atoi(argv[5]);
@@ -38,6 +39,7 @@ int main(int argc, char **argv) {
 
     size_t bytes = (size_t)6 * n * n * sizeof(double) + (1 << 20);
     if (arena_init(bytes)) return 1;
+    if (cfg.v == V_PROCS_POOL) procs_pool_init(cfg.P);
 
     Mat M = arena_mat(n, n), Out = arena_mat(n, n);
     mat_diagdom(M, seed);
@@ -47,6 +49,7 @@ int main(int argc, char **argv) {
     double t0 = now();
     int rc = invert(M, Out, &cfg);
     double t1 = now();
+    if (cfg.v == V_PROCS_POOL) procs_pool_destroy();
 
     double res = rc != 0 ? -1.0 : (getenv("NORES") ? -2.0 : residual_inf(M, Out));
 

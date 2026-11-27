@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <semaphore.h>
+#include <errno.h>
 #include <sys/wait.h>
 
 typedef struct ThreadPool ThreadPool;
@@ -80,6 +82,88 @@ static void pool_destroy(ThreadPool *pool) {
     free(pool->args);
 }
 
+/* ================= Pool persistente de procesos ================= */
+typedef struct {
+    sem_t start;
+    sem_t done;
+    int stop;
+    Gemm g;
+    int r0, r1;
+} ProcSlot;
+
+static int       g_np    = 0;
+static ProcSlot *g_slots = NULL;
+static pid_t    *g_pids  = NULL;
+
+static void sem_wait_intr(sem_t *s) {
+    while (sem_wait(s) == -1) {
+        if (errno != EINTR) { perror("sem_wait"); _exit(1); }
+    }
+}
+
+static void proc_worker_loop(ProcSlot *slot) {
+    for (;;) {
+        sem_wait_intr(&slot->start);
+        if (slot->stop) break;
+        if (slot->r0 < slot->r1) gemm_rows(&slot->g, slot->r0, slot->r1);
+        sem_post(&slot->done);
+    }
+}
+
+void procs_pool_init(int P) {
+    g_np = P < 1 ? 1 : P;
+    size_t ndoubles = ((size_t)g_np * sizeof(ProcSlot) + sizeof(double) - 1) / sizeof(double);
+    Mat shm_blk = arena_mat(1, (int)ndoubles);
+    g_slots = (ProcSlot *)shm_blk.p;
+    g_pids = malloc((size_t)g_np * sizeof(pid_t));
+    if (!g_pids) { perror("malloc"); exit(1); }
+    for (int i = 0; i < g_np; i++) {
+        g_slots[i].stop = 0;
+        if (sem_init(&g_slots[i].start, 1, 0) || sem_init(&g_slots[i].done, 1, 0)) {
+            perror("sem_init"); exit(1);
+        }
+    }
+    for (int i = 0; i < g_np; i++) {
+        pid_t pid = fork();
+        if (pid < 0) { perror("fork"); exit(1); }
+        if (pid == 0) {
+            proc_worker_loop(&g_slots[i]);
+            _exit(0);
+        }
+        g_pids[i] = pid;
+    }
+}
+
+static void procs_pool_gemm(const Gemm *g) {
+    int rows = g->C.r;
+    for (int i = 0; i < g_np; i++) {
+        g_slots[i].stop = 0;
+        g_slots[i].g = *g;
+        g_slots[i].r0 = (int)((long)rows * i / g_np);
+        g_slots[i].r1 = (int)((long)rows * (i + 1) / g_np);
+        sem_post(&g_slots[i].start);
+    }
+    for (int i = 0; i < g_np; i++) sem_wait_intr(&g_slots[i].done);
+}
+
+void procs_pool_destroy(void) {
+    if (!g_slots || !g_pids) return;
+    for (int i = 0; i < g_np; i++) {
+        g_slots[i].stop = 1;
+        sem_post(&g_slots[i].start);
+    }
+    for (int i = 0; i < g_np; i++) {
+        int st;
+        while (waitpid(g_pids[i], &st, 0) == -1 && errno == EINTR) {}
+        sem_destroy(&g_slots[i].start);
+        sem_destroy(&g_slots[i].done);
+    }
+    free(g_pids);
+    g_pids = NULL;
+    g_slots = NULL;
+    g_np = 0;
+}
+
 /* Un producto independiente, segun la version. */
 static void do_gemm(const Gemm *g, const Cfg *c, ThreadPool *pool) {
     switch (c->v) {
@@ -89,6 +173,7 @@ static void do_gemm(const Gemm *g, const Cfg *c, ThreadPool *pool) {
     case V_HIER:            gemm_threads(g, c->P); break;   /* productos dependientes: todos los hilos */
     case V_PAIRT:           gemm_threads(g, c->P); break;
     case V_THREADS_BARRIER: pool_gemm(pool, g); break;
+    case V_PROCS_POOL:      procs_pool_gemm(g); break;
     }
 }
 
