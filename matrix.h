@@ -32,7 +32,7 @@ void gemm_threads(const Gemm *g, int nthreads);         /* filas entre hilos */
 void gemm_procs(const Gemm *g, int nprocs, int nthreads); /* filas entre procesos (y hilos) */
 
 /* ---- Inversión por bloques (complemento de Schur) ---- */
-typedef enum { V_SEQ, V_THREADS, V_PROCS, V_HIER, V_PAIRT } Version;
+typedef enum { V_SEQ, V_THREADS, V_PROCS, V_HIER, V_PAIRT, V_THREADS_BARRIER } Version;
 typedef struct { Version v; int P; int n0; } Cfg;
 int invert(Mat M, Mat Out, const Cfg *cfg);             /* 0 ok, -1 singular */
 
